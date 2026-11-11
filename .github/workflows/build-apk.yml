@@ -15,21 +15,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project ZIP
+      - name: Extract ZIP
         run: |
+          rm -rf extracted
           mkdir extracted
           unzip -o forex_alert_fixed.zip -d extracted
 
       - name: Find Flutter project
-        run: |
-          find extracted -name pubspec.yaml -print
-
-      - name: Set project directory
         id: project
         run: |
           PROJECT_DIR=$(dirname "$(find extracted -name pubspec.yaml -print -quit)")
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "Flutter project: $PROJECT_DIR"
+          echo "Flutter project found at: $PROJECT_DIR"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -37,16 +34,29 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Generate Android project
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter create --platforms=android --org com.example --project-name forex_alert .
+
+      - name: Configure Android project
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          python3 scripts/prepare_android.py
+
       - name: Install dependencies
         working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter pub get
+        run: |
+          flutter pub get
 
       - name: Build APK
         working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: forex-alert-release-apk
           path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
