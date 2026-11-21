@@ -9,43 +9,53 @@ on:
       - "forex_alert_fixed.zip"
       - ".github/workflows/build-apk.yml"
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: Build Android Release APK
+    name: Build Forex Alerts Android APK
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Extract Flutter project
-      - name: Extract ZIP
+      - name: Verify source archive
         shell: bash
         run: |
           set -e
 
           if [ ! -f forex_alert_fixed.zip ]; then
-            echo "::error::forex_alert_fixed.zip was not found."
+            echo "::error::forex_alert_fixed.zip is missing."
             exit 1
           fi
+
+          unzip -t forex_alert_fixed.zip
+
+      - name: Extract Flutter project
+        shell: bash
+        run: |
+          set -e
 
           rm -rf extracted
           mkdir -p extracted
 
-          unzip -o forex_alert_fixed.zip -d extracted
+          unzip -q forex_alert_fixed.zip -d extracted
 
-      # 3. Locate Flutter project
-      - name: Find Flutter project
+      - name: Locate Flutter project
         id: project
         shell: bash
         run: |
           set -e
 
-          PUBSPEC=$(find extracted -name pubspec.yaml -type f -print -quit)
+          PUBSPEC=$(find extracted \
+            -type f \
+            -name pubspec.yaml \
+            -print -quit)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "::error::No Flutter pubspec.yaml found inside the ZIP."
+            echo "::error::Flutter pubspec.yaml not found."
             exit 1
           fi
 
@@ -53,89 +63,92 @@ jobs:
 
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-          echo "Flutter project found at: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
 
-      # 4. Set up Java
+          ls -la "$PROJECT_DIR"
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # 5. Set up Flutter
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      # 6. Display environment information
-      - name: Check build environment
-        working-directory: ${{ steps.project.outputs.dir }}
+      - name: Check environment
         run: |
           flutter --version
           dart --version
           java -version
-          flutter doctor -v
 
-      # 7. Generate Android project
       - name: Generate Android project
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
+          set -e
+
           flutter create \
             --platforms=android \
             --org com.example \
             --project-name forex_alert \
             .
 
-      # 8. Configure Android project
       - name: Configure Android project
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           set -e
 
           if [ ! -f scripts/prepare_android.py ]; then
-            echo "::error::scripts/prepare_android.py was not found."
+            echo "::error::prepare_android.py is missing."
             exit 1
           fi
 
           python3 scripts/prepare_android.py
 
-      # 9. Install dependencies
-      - name: Install dependencies
+      - name: Install Flutter dependencies
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter pub get
 
-      # 10. Validate Flutter project
-      - name: Analyze Flutter project
+      - name: Verify Android configuration
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          flutter analyze
+          set -e
 
-      # 11. Build release APK
-      - name: Build APK
+          test -f android/app/build.gradle.kts \
+            || test -f android/app/build.gradle
+
+          test -f android/app/src/main/AndroidManifest.xml
+
+          grep -n "FOREGROUND_SERVICE" \
+            android/app/src/main/AndroidManifest.xml
+
+      - name: Build release APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter build apk \
             --release \
             --verbose
 
-      # 12. Verify APK
-      - name: Verify APK
+      - name: Verify generated APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
+          set -e
+
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "::error::Release APK was not generated."
+            echo "::error::APK generation failed."
             exit 1
           fi
 
+          echo "APK generated successfully."
           ls -lh "$APK"
 
-      # 13. Upload APK
-      - name: Upload APK
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: forex-alert-release-apk
